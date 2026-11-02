@@ -1,0 +1,215 @@
+---
+title: 'Datos de panel: flujo de efectivo operativo de cinco empresas de moda'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Se estudia qué factores se asocian con el **flujo de efectivo operativo** de cinco empresas de moda y calzado de mi portafolio: Ralph Lauren (RL), Tapestry (TPR), PVH, Capri (CPRI) y Deckers (DECK), con datos de sus reportes trimestrales del tercer trimestre de 2018 al cuarto trimestre de 2025. Es un **panel balanceado**: 5 empresas (unidades *i*) observadas durante 30 trimestres (tiempo *t*), es decir, 150 observaciones.
+
+La variable dependiente se eligió en función de la estrategia del portafolio: las empresas que generan más efectivo con su operación son más sólidas para enfrentar periodos de volatilidad, como el aumento reciente de volatilidad identificado en los modelos de actividades anteriores.
+
+Variables (en millones de dólares):
+
+- **flujo_operativo**: flujo de efectivo de las actividades de operación (variable dependiente).
+- **ventas**: ingresos totales del trimestre.
+- **deuda**: deuda total al cierre del trimestre.
+- **activos**: activos totales al cierre del trimestre.
+
+Los datos se obtuvieron de LSEG Workspace (Financial Summary, periodicidad trimestral) y se consolidaron en el archivo `panel_moda.xlsx`. 
+
+```{r}
+library(plm)
+```
+
+```{r}
+library(lmtest)
+```
+
+```{r}
+library(readxl)
+```
+
+
+```{r}
+panel <- read_excel("panel_moda.xlsx")
+head(panel)
+```
+
+# 4. Modelos
+
+## 4.1 Regresión lineal (MCO) sin considerar el panel
+
+```{r}
+flujo_reglin <- lm(flujo_operativo ~ ventas +
+                     deuda +
+                     activos,
+                   data = panel)
+summary(flujo_reglin)
+```
+
+**Interpretación.**
+Este modelo trata las 150 observaciones como independientes, sin considerar que provienen de las mismas cinco empresas. Las ventas son la variable con mayor efecto: por cada millón de dólares adicional de ventas, el flujo operativo aumenta en promedio 0.46 millones (p < 0.001). La deuda tiene un efecto positivo pequeño (0.08, p = 0.002) y los activos un efecto negativo (-0.08, p < 0.001), posiblemente porque parte de ellos, como inventarios y cuentas por cobrar, absorbe efectivo. El intercepto no es significativo. El modelo explica el 33.0% de la variación del flujo operativo y es significativo en conjunto (F = 25.49, p < 0.001). Su limitación es que ignora las diferencias propias de cada empresa, por lo que sus coeficientes pueden estar sesgados.
+
+## 4.2 Modelo de panel agrupado (pooled)
+
+```{r}
+flujo_po <- plm(flujo_operativo ~ ventas +
+                  deuda +
+                  activos,
+                data = panel,
+                model = "pooling",
+                index = c("empresa", "trimestre"))
+summary(flujo_po)
+```
+
+**Interpretación.** El modelo agrupado produce exactamente los mismos coeficientes que la regresión lineal, lo que confirma que el panel quedó bien definido. El encabezado indica un panel balanceado con 5 empresas (n), 30 trimestres (T) y 150 observaciones (N), sin datos faltantes. Este modelo supone que todas las empresas tienen el mismo intercepto, es decir, que no existen diferencias propias de cada una, supuesto que se evalúa con la prueba F.
+
+## 4.3 Prueba F de efectos individuales (pooled vs. efectos fijos)
+
+```{r}
+pFtest(flujo_operativo ~ ventas +
+         deuda +
+         activos,
+       data = panel,
+       model = "within",
+       index = c("empresa", "trimestre"))
+```
+**Interpretación.** La prueba F arroja un estadístico de 5.16 con 4 y 142 grados de libertad y un p-value de 0.0007, menor a 0.05, por lo que se rechaza la hipótesis nula de que no existen efectos individuales. Esto indica que hay diferencias significativas entre las cinco empresas que el modelo agrupado no captura, como su modelo de negocio, su posicionamiento de marca o su estructura de costos, por lo que el modelo de efectos fijos es preferible al modelo agrupado.
+
+## 4.4 Modelo de efectos fijos (within)
+
+```{r}
+flujo_fe <- plm(flujo_operativo ~ ventas +
+                  deuda +
+                  activos,
+                data = panel,
+                model = "within",
+                index = c("empresa", "trimestre"))
+summary(flujo_fe)
+```
+
+```{r}
+fixef(flujo_fe)
+```
+**Interpretación.** Al dar a cada empresa su propio intercepto, los resultados cambian de forma importante respecto al modelo agrupado. Las ventas siguen siendo altamente significativas y su efecto aumenta: dentro de cada empresa, por cada millón de dólares adicional de ventas en un trimestre, el flujo operativo aumenta en promedio 0.52 millones (p < 2e-16). En cambio, la deuda (p = 0.808) y los activos (p = 0.971) dejan de ser significativos. Esto indica que su efecto en el modelo agrupado reflejaba diferencias entre empresas, como su tamaño o nivel de endeudamiento, y no una relación con el flujo operativo de cada empresa a lo largo del tiempo. El R2 within es de 41.4%, mayor al del modelo agrupado, lo que confirma que controlar las diferencias propias de cada empresa mejora el ajuste. Para la estrategia del portafolio, esto sugiere que la capacidad de generar efectivo depende principalmente del desempeño en ventas de cada empresa, más que de su estructura de financiamiento.
+
+Los efectos fijos representan el intercepto propio de cada empresa, es decir, las diferencias en su capacidad de generar flujo operativo que no se explican por sus ventas, deuda y activos. Aunque su valor absoluto no tiene interpretación económica directa, su comparación indica que, con el mismo nivel de ventas, deuda y activos, Deckers es la empresa que genera mayor flujo operativo (-294), seguida de Capri (-484), Tapestry (-586) y Ralph Lauren (-639), mientras que PVH es la que genera menos (-993). Esto puede reflejar diferencias en su estructura de costos y en su modelo de negocio: Deckers opera con muy poca deuda y marcas de alto crecimiento, mientras que PVH es la empresa de mayor tamaño y endeudamiento del grupo. Para la estrategia del portafolio, este resultado respalda la inclusión de Deckers como una empresa con alta capacidad de generación de efectivo, aunque con mayor volatilidad en su precio.
+
+## 4.5 Modelo de efectos aleatorios
+
+```{r}
+flujo_re <- plm(flujo_operativo ~ ventas +
+                  deuda +
+                  activos,
+                data = panel,
+                model = "random",
+                index = c("empresa", "trimestre"))
+summary(flujo_re)
+```
+
+**Interpretación.** En el modelo de efectos aleatorios, la varianza del efecto individual es igual a cero y el valor de theta es 0, lo que significa que el modelo no atribuye ninguna parte de la variación a las diferencias entre empresas. Como consecuencia, sus coeficientes, errores estándar y R2 son idénticos a los del modelo agrupado: las ventas (0.456), la deuda (0.083) y los activos (-0.078) son significativos, con un R2 de 34.4%. Este resultado se debe a que, con solo cinco empresas, la varianza de los efectos individuales se estima con poca precisión, y cuando su estimación resulta negativa se fija en cero. Sin embargo, contradice la prueba F, que sí identificó diferencias significativas entre empresas, por lo que el modelo de efectos aleatorios no logra capturar adecuadamente la heterogeneidad del panel.
+
+## 4.6 Prueba de Hausman (efectos fijos vs. aleatorios)
+
+```{r}
+phtest(flujo_fe, flujo_re)
+```
+
+**Interpretación.** La prueba de Hausman arroja un estadístico chi-cuadrado de 35.64 con 3 grados de libertad y un p-value de 8.94e-08, menor a 0.05, por lo que se rechaza la hipótesis nula. Esto indica que las diferencias propias de cada empresa están correlacionadas con las variables explicativas, por lo que el modelo de efectos aleatorios es inconsistente y se elige el modelo de efectos fijos. Este resultado es consistente con la prueba F, que también identificó diferencias significativas entre empresas, y con el hecho de que las variables de tamaño y endeudamiento dejaron de ser significativas al controlar los efectos fijos.
+
+## 4.7 Prueba de autocorrelación serial (Wooldridge)
+
+```{r}
+pwartest(flujo_operativo ~ ventas + deuda + activos,
+         data = panel,
+         index = c("empresa", "trimestre"))
+```
+
+**Interpretación.** La prueba de Wooldridge arroja un estadístico F de 33.93 con un p-value de 3.63e-08, menor a 0.05, por lo que se rechaza la hipótesis nula y existe autocorrelación serial: los errores de cada empresa en un trimestre se relacionan con los del trimestre anterior. Esto es común en datos financieros trimestrales debido a la estacionalidad del flujo de efectivo, como el aumento recurrente en la temporada navideña. Como consecuencia, los errores estándar usuales del modelo de efectos fijos son poco confiables, por lo que se estiman errores estándar robustos mediante vcovHC.
+
+## 4.8 Prueba de dependencia transversal (Pesaran CD)
+
+```{r}
+pcdtest(flujo_operativo ~ ventas + deuda + activos,
+        data = panel,
+        index = c("empresa", "trimestre"))
+```
+**Interpretación.** La prueba de Pesaran arroja un estadístico z de 11.29 con un p-value menor a 2.2e-16, por lo que se rechaza la hipótesis nula y existe dependencia transversal: los errores de las cinco empresas están correlacionados en un mismo trimestre. Esto es consistente con que pertenecen al mismo sector y enfrentan choques comunes, como la pandemia de 2020, la estacionalidad de la temporada navideña o los cambios en la política arancelaria. Dado que el modelo presenta tanto autocorrelación serial como dependencia transversal, se estiman errores estándar de Driscoll-Kraay, que corrigen ambos problemas sin modificar los coeficientes.
+
+# 6. Preguntas del Capítulo 16 de Gujarati
+
+```{r}
+library(plm)
+library(Ecdat)
+data("Airline")
+head(Airline)
+```
+```{r}
+aero_lineal <- plm(cost ~ output + pf + lf,
+                   data = Airline,
+                   model = "within",
+                   index = c("airline", "year"))
+summary(aero_lineal)
+#Modelo lineal con efectos fijos, como en la ecuación 16.4.2
+```
+```{r}
+aero_log <- plm(log(cost) ~ log(output) + log(pf) + log(lf),
+                data = Airline,
+                model = "within",
+                index = c("airline", "year"))
+summary(aero_log)
+#Modelo log-lineal con efectos fijos
+```
+**16.10.** El modelo lineal de efectos fijos reproduce los resultados de la tabla 16.2: la producción, el precio del combustible y el factor de carga son altamente significativos, aunque sus coeficientes dependen de las unidades de medida. En el modelo log-lineal, los coeficientes son elasticidades: un aumento de 1% en la producción eleva el costo total en 0.92%, lo que indica economías de escala; un aumento de 1% en el precio del combustible lo eleva en 0.42%; y un aumento de 1% en el factor de carga lo reduce en 0.55%, por un mejor aprovechamiento de los aviones. Ambos modelos coinciden en el signo y la significancia de las variables, pero el log-lineal es preferible porque sus resultados son más fáciles de interpretar y comparar.
+
+
+```{r}
+remotes::install_github("brunoruas2/gujarati")
+```
+```{r}
+library(gujarati)
+data("Table1_1")
+head(Table1_1)
+```
+```{r}
+huevos <- data.frame(
+  estado = rep(as.character(Table1_1$STATE), 2),
+  anio = rep(c(1990, 1991), each = nrow(Table1_1)),
+  Y = c(as.numeric(as.character(Table1_1$Y1)), as.numeric(as.character(Table1_1$Y2))),
+  X = c(as.numeric(as.character(Table1_1$X1)), as.numeric(as.character(Table1_1$X2)))
+)
+#Se reorganizan los datos en formato de panel (una fila por estado y año) y se convierten a números
+```
+
+```{r}
+modelo_1990 <- lm(Y ~ X, data = subset(huevos, anio == 1990))
+summary(modelo_1990)
+
+modelo_1991 <- lm(Y ~ X, data = subset(huevos, anio == 1991))
+summary(modelo_1991)
+```
+
+```{r}
+modelo_agrupado <- lm(Y ~ X, data = huevos)
+summary(modelo_agrupado)
+```
+```{r}
+modelo_fe_anio <- lm(Y ~ X + factor(anio), data = huevos)
+summary(modelo_fe_anio)
+```
+**16.11 b)** Al agrupar las observaciones de ambos años se supone que la relación entre el precio y la producción de huevos es la misma en 1990 y en 1991, es decir, que el intercepto y la pendiente no cambian entre años, y que tampoco existen diferencias propias de cada estado.
+
+**16.11 d)** Sí es posible, pero con limitaciones importantes. Con 50 estados y solo dos años hay 100 observaciones, y distinguir a cada estado requiere 49 variables dicótomas además del intercepto y la pendiente, lo que consume la mitad de los grados de libertad. Además, la pendiente solo se estimaría a partir del cambio de cada estado entre 1990 y 1991, que suele ser pequeño, por lo que la estimación sería poco precisa.
+
+**16.11 e)** Sí tiene sentido, ya que los estados pueden diferir por factores como su clima, su tamaño o su infraestructura avícola, y los años pueden diferir por factores comunes a todos los estados, como cambios en la demanda o en los costos. Con un intercepto común, se necesitarían 49 variables dicótomas para los estados y 1 para el año, es decir, 50 variables dicótomas en total.
+
+**16.11 f)** El modelo de componentes del error no sería el más apropiado, ya que supone que las unidades son una muestra aleatoria de una población más amplia, mientras que los 50 estados constituyen la población completa de Estados Unidos. En este caso, el modelo de efectos fijos es más adecuado. En lugar de EViews, el modelo puede estimarse en R con la función plm y la opción model = "random".
